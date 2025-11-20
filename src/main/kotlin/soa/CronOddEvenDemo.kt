@@ -23,37 +23,27 @@ import kotlin.random.Random
 
 private val logger = LoggerFactory.getLogger("soa.CronOddEvenDemo")
 
-/**
- * Spring Integration configuration for demonstrating Enterprise Integration Patterns.
- * This application implements a message flow that processes numbers and routes them
- * based on whether they are even or odd.
- *
- * **Your Task**: Analyze this configuration, create an EIP diagram, and compare it
- * with the target diagram to identify and fix any issues.
- */
 @SpringBootApplication
 @EnableIntegration
 @EnableScheduling
 class IntegrationApplication(
     private val sendNumber: SendNumber,
 ) {
-    /**
-     * Creates an atomic integer source that generates sequential numbers.
-     */
     @Bean
     fun integerSource(): AtomicInteger = AtomicInteger()
 
-    /**
-     * Defines a publish-subscribe channel for even numbers.
-     * Multiple subscribers can receive messages from this channel.
-     */
+    // Cambio: PublishSubscribe en lugar de direct (pero comportamiento similar)
     @Bean
     fun evenChannel(): PublishSubscribeChannelSpec<*> = MessageChannels.publishSubscribe()
 
-    /**
-     * Main integration flow that polls the integer source and routes messages.
-     * Polls every 100ms and routes based on even/odd logic.
-     */
+    @Bean
+    fun numberChannel(): PublishSubscribeChannelSpec<*> = MessageChannels.publishSubscribe()
+
+    // Cambio: oddChannel también como PublishSubscribe para mantener coherencia
+    @Bean
+    fun oddChannel(): PublishSubscribeChannelSpec<*> = MessageChannels.publishSubscribe()
+
+    // Flujo principal: genera números y los envía a numberChannel
     @Bean
     fun myFlow(integerSource: AtomicInteger): IntegrationFlow =
         integrationFlow(
@@ -64,6 +54,14 @@ class IntegrationApplication(
                 logger.info("📥 Source generated number: {}", num)
                 num
             }
+            // Diferencia: usamos channel() en lugar de route inline
+            channel("numberChannel")
+        }
+
+    // RESTAURADO: Router separado que lee de numberChannel
+    @Bean
+    fun distributionFlow(): IntegrationFlow =
+        integrationFlow("numberChannel") {
             route { p: Int ->
                 val channel = if (p % 2 == 0) "evenChannel" else "oddChannel"
                 logger.info("🔀 Router: {} → {}", p, channel)
@@ -71,10 +69,6 @@ class IntegrationApplication(
             }
         }
 
-    /**
-     * Integration flow for processing even numbers.
-     * Transforms integers to strings and logs the result.
-     */
     @Bean
     fun evenFlow(): IntegrationFlow =
         integrationFlow("evenChannel") {
@@ -87,19 +81,10 @@ class IntegrationApplication(
             }
         }
 
-    /**
-     * Integration flow for processing odd numbers.
-     * Applies a filter before transformation and logging.
-     * Note: Examine the filter condition carefully.
-     */
+    // SIN FILTRO: todos los impares pasan directamente
     @Bean
     fun oddFlow(): IntegrationFlow =
         integrationFlow("oddChannel") {
-            filter { p: Int ->
-                val passes = p % 2 == 0
-                logger.info("  🔍 Odd Filter: checking {} → {}", p, if (passes) "PASS" else "REJECT")
-                passes
-            } // , { discardChannel("discardChannel") })
             transform { obj: Int ->
                 logger.info("  ⚙️  Odd Transformer: {} → 'Number {}'", obj, obj)
                 "Number $obj"
@@ -109,9 +94,6 @@ class IntegrationApplication(
             }
         }
 
-    /**
-     * Integration flow for handling discarded messages.
-     */
     @Bean
     fun discarded(): IntegrationFlow =
         integrationFlow("discardChannel") {
@@ -120,9 +102,6 @@ class IntegrationApplication(
             }
         }
 
-    /**
-     * Scheduled task that periodically sends negative random numbers via the gateway.
-     */
     @Scheduled(fixedRate = 1000)
     fun sendNumber() {
         val number = -Random.nextInt(100)
@@ -131,10 +110,7 @@ class IntegrationApplication(
     }
 }
 
-/**
- * Service component that processes messages from the odd channel.
- * Uses @ServiceActivator annotation to connect to the integration flow.
- */
+// RESTAURADO: ServiceActivator activo
 @Component
 class SomeService {
     @ServiceActivator(inputChannel = "oddChannel")
@@ -143,14 +119,9 @@ class SomeService {
     }
 }
 
-/**
- * Messaging Gateway for sending numbers into the integration flow.
- * This provides a simple interface to inject messages into the system.
- * Note: Check which channel this gateway sends messages to.
- */
 @MessagingGateway
 interface SendNumber {
-    @Gateway(requestChannel = "evenChannel")
+    @Gateway(requestChannel = "numberChannel")
     fun sendNumber(number: Int)
 }
 
